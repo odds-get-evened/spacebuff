@@ -45,56 +45,6 @@ class Airport(Entity):
         self.port_name = name
 
 
-# --- UPGRADED CAMERA SYSTEM ---
-class OrbitalTrackingCamera(Entity):
-    def __init__(self, default_target, default_distance, **kwargs):
-        super().__init__(**kwargs)
-        self.default_target = default_target
-        self.current_target = default_target
-
-        self.distance = default_distance
-        self.target_distance = default_distance
-
-        # New: Allows dragging the camera off-center
-        self.pan_offset = Vec3(0, 0, 0)
-
-        camera.parent = self
-        camera.position = (0, 0, -self.distance)
-        camera.look_at(self.current_target)
-
-    def focus_on(self, entity, zoom_level):
-        """Locks the camera to a new entity, sets the zoom, and resets panning."""
-        self.current_target = entity
-        self.target_distance = zoom_level
-        self.pan_offset = Vec3(0, 0, 0)  # Snap back to center when switching targets
-
-    def input(self, key):
-        if key == 'scroll up':
-            self.target_distance = max(10, self.target_distance - 150)
-        if key == 'scroll down':
-            self.target_distance = min(5000, self.target_distance + 150)
-
-    def update(self):
-        # 1. Right-Click Drag to PAN (Slide the map around)
-        if mouse.right:
-            self.pan_offset += camera.right * -mouse.velocity[0] * (self.distance * 0.5)
-            self.pan_offset += camera.up * -mouse.velocity[1] * (self.distance * 0.5)
-
-        # 2. Smoothly track the target + our pan offset
-        target_pos = self.current_target.position + self.pan_offset
-        self.position = lerp(self.position, target_pos, time.dt * 10)
-
-        # 3. Smoothly glide to the target zoom distance
-        self.distance = lerp(self.distance, self.target_distance, time.dt * 5)
-        camera.position = (0, 0, -self.distance)
-
-        # 4. Left-Click Drag to ORBIT (Rotate around the target)
-        if mouse.left:
-            self.rotation_y += mouse.velocity[0] * 150
-            self.rotation_x -= mouse.velocity[1] * 150
-            self.rotation_x = clamp(self.rotation_x, -85, 85)
-
-
 class HeavyAircraft(Entity):
     def __init__(self, ac_id, route, model_type, cruise_speed_kmh, color_theme, **kwargs):
         super().__init__(
@@ -216,8 +166,6 @@ class TCASPredictiveEngine:
 
 def generate_surface_coordinate(radius, center_y):
     theta = random.uniform(0, 2 * math.pi)
-    # FIX: Expanded the generation area from 15 degrees to 75 degrees.
-    # This creates massive, globe-spanning distances between airports.
     phi = random.uniform(math.radians(10), math.radians(75))
 
     x = radius * math.sin(phi) * math.cos(theta)
@@ -241,7 +189,6 @@ if __name__ == "__main__":
     engine = TCASPredictiveEngine(SEPARATION_MIN_KM, VERTICAL_SEP_KM, LOOKAHEAD_SECONDS, logbook)
 
     airports = []
-    # Increased the number of airports to allow for more route variation
     for i in range(15):
         pos = generate_surface_coordinate(EARTH_RADIUS, EARTH_CENTER_Y)
         airports.append(Airport(name=f"Port_{i}", position=pos))
@@ -255,7 +202,6 @@ if __name__ == "__main__":
 
     for i in range(20):
         profile = random.choice(fleet_profiles)
-        # FIX: Each aircraft now gets a randomized route of 3 to 6 different stops
         route_length = random.randint(3, 6)
         route = random.sample(airports, route_length)
 
@@ -267,26 +213,32 @@ if __name__ == "__main__":
             color_theme=profile["color"]
         ))
 
-    # --- HOTKEY LOGIC ---
+    # --- STANDARD CAMERA & HOTKEY LOGIC ---
+    cam = EditorCamera()
+    cam.position = (0, 1000, -2500)
+    cam.look_at(earth_surface)
+
     focused_index = -1
 
 
     def input(key):
         global focused_index
         if key == 'tab':
+            # Teleport camera slightly above and behind the next plane
             focused_index = (focused_index + 1) % len(fleet)
-            cam_pivot.focus_on(fleet[focused_index], zoom_level=30)
+            target = fleet[focused_index]
+            cam.position = target.position + Vec3(0, 50, -100)
+            cam.look_at(target)
+
         elif key == 'escape':
+            # Teleport camera back to the global view
             focused_index = -1
-            cam_pivot.focus_on(earth_surface, zoom_level=2500)
+            cam.position = (0, 1000, -2500)
+            cam.look_at(earth_surface)
 
 
     def update():
         engine.enforce_separation(fleet)
 
 
-    cam_pivot = OrbitalTrackingCamera(default_target=earth_surface, default_distance=2500)
-    cam_pivot.position = earth_surface.position
-
     app.run()
-    
